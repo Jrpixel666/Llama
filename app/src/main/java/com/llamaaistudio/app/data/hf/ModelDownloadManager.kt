@@ -1,6 +1,5 @@
 package com.llamaaistudio.app.data.hf
 
-import com.llamaaistudio.app.data.repo.ModelRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -34,17 +33,20 @@ data class DownloadState(
 /**
  * Resumable GGUF downloader: streams into `<name>.gguf.part`, supports HTTP Range-based
  * pause/resume, verifies SHA-256 against Hugging Face's published LFS hash when available,
- * then registers the finished file with [modelRepository].
+ * then hands the finished file to [onComplete]. Generic over what kind of GGUF it is (LLM
+ * weights, a diffusion checkpoint, ...) — that's purely the caller's business via
+ * [onComplete] and [destinationDir].
  */
 class ModelDownloadManager(
-    private val modelRepository: ModelRepository,
+    private val destinationDir: File,
+    private val onComplete: suspend (file: File, meta: GgufFileOption, sha256: String?, verified: Boolean) -> Unit,
     private val client: OkHttpClient = OkHttpClient.Builder().build(),
 ) {
     private val _downloads = MutableStateFlow<Map<String, DownloadState>>(emptyMap())
     val downloads: StateFlow<Map<String, DownloadState>> = _downloads
 
-    // Process-wide scope: downloads must survive the Models screen's ViewModel being cleared
-    // (e.g. the user switches tabs mid-download).
+    // Process-wide scope: downloads must survive the hosting screen's ViewModel being
+    // cleared (e.g. the user switches tabs mid-download).
     private val managerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val jobs = mutableMapOf<String, Job>()
 
@@ -54,7 +56,7 @@ class ModelDownloadManager(
         val key = keyFor(file)
         if (jobs[key]?.isActive == true) return
 
-        val destFile = File(modelRepository.modelsDir, sanitizeFilename(file.filename))
+        val destFile = File(destinationDir, sanitizeFilename(file.filename))
         val partFile = File(destFile.parentFile, destFile.name + ".part")
 
         _downloads.update { it + (key to DownloadState(file, destFile, partFile.length(), DownloadStatus.QUEUED)) }
@@ -140,16 +142,7 @@ class ModelDownloadManager(
             }
 
             partFile.renameTo(destFile)
-            modelRepository.registerModel(
-                file = destFile,
-                displayName = file.filename.removeSuffix(".gguf"),
-                hfModelId = file.modelId,
-                hfFilename = file.filename,
-                sha256 = expectedSha,
-                sha256Verified = verified,
-                quantization = file.quantization,
-                paramCount = file.paramCount,
-            )
+            onComplete(destFile, file, expectedSha, verified)
             update(key) { it.copy(status = DownloadStatus.COMPLETED, downloadedBytes = destFile.length()) }
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e

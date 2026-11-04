@@ -94,6 +94,10 @@ android {
         }
         jniLibs {
             useLegacyPackaging = false
+            // :app and :imagegen each independently build against ANDROID_STL=c++_shared;
+            // both contribute a byte-identical libc++_shared.so from the same NDK, which
+            // the merge step otherwise flags as a conflict.
+            pickFirsts += "**/libc++_shared.so"
         }
     }
 
@@ -106,6 +110,8 @@ tasks.withType<KotlinCompile>().configureEach {
 }
 
 dependencies {
+    implementation(project(":imagegen"))
+
     val composeBom = platform("androidx.compose:compose-bom:2024.11.00")
     implementation(composeBom)
     androidTestImplementation(composeBom)

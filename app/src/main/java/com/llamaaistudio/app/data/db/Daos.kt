@@ -108,6 +108,36 @@ interface LocalModelDao {
 }
 
 @Dao
+interface LocalImageModelDao {
+    @Query("SELECT * FROM local_image_models ORDER BY lastUsedAt DESC, downloadedAt DESC")
+    fun observeAll(): Flow<List<LocalImageModelEntity>>
+
+    @Query("SELECT * FROM local_image_models WHERE filePath = :path")
+    suspend fun get(path: String): LocalImageModelEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(model: LocalImageModelEntity)
+
+    @Query("UPDATE local_image_models SET lastUsedAt = :timestamp WHERE filePath = :path")
+    suspend fun touchLastUsed(path: String, timestamp: Long)
+
+    @Query("DELETE FROM local_image_models WHERE filePath = :path")
+    suspend fun delete(path: String)
+}
+
+@Dao
+interface GeneratedImageDao {
+    @Query("SELECT * FROM generated_images ORDER BY createdAt DESC")
+    fun observeAll(): Flow<List<GeneratedImageEntity>>
+
+    @Insert
+    suspend fun insert(image: GeneratedImageEntity): Long
+
+    @Delete
+    suspend fun delete(image: GeneratedImageEntity)
+}
+
+@Dao
 interface DevProjectDao {
     @Query("SELECT * FROM dev_projects ORDER BY lastOpenedAt DESC")
     fun observeAll(): Flow<List<DevProjectEntity>>

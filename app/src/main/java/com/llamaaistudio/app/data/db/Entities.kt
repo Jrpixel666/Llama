@@ -85,6 +85,36 @@ data class LocalModelEntity(
     val lastUsedAt: Long? = null,
 )
 
+@Entity(tableName = "local_image_models")
+data class LocalImageModelEntity(
+    @PrimaryKey val filePath: String,
+    val displayName: String,
+    val hfModelId: String? = null,
+    val hfFilename: String? = null,
+    val sizeBytes: Long,
+    val quantization: String? = null,
+    val sha256: String? = null,
+    val sha256Verified: Boolean = false,
+    val downloadedAt: Long = System.currentTimeMillis(),
+    val lastUsedAt: Long? = null,
+)
+
+@Entity(tableName = "generated_images")
+data class GeneratedImageEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val filePath: String,
+    val prompt: String,
+    val negativePrompt: String = "",
+    val width: Int,
+    val height: Int,
+    val steps: Int,
+    val cfgScale: Float,
+    val seed: Long,
+    val modelFilePath: String? = null,
+    val genMs: Double,
+    val createdAt: Long = System.currentTimeMillis(),
+)
+
 @Entity(tableName = "dev_projects")
 data class DevProjectEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,

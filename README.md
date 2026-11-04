@@ -13,6 +13,12 @@ a notes workspace, and a lightweight Android dev workspace.
 - **Notes** — Markdown notes with folders, search, autosave, AI summaries (runs on the
   loaded local model), and two-way handoff with Chat (send a note into chat context, save a
   chat reply as a note). Side-by-side layout on wide screens (`BoxWithConstraints`).
+- **Image** — fully local text-to-image generation on a vendored, pinned build of
+  stable-diffusion.cpp (`third_party/stable-diffusion.cpp`, own module: `:imagegen`).
+  Prompt/negative-prompt/steps/CFG/size controls, live per-step progress and cancel, a
+  persisted gallery (Room), and its own Hugging Face GGUF browser for diffusion
+  checkpoints. CLIP-based models only (SD1.x/2.x/SDXL/SDXL-Turbo and similar) — see
+  **Image generation scope** below for why.
 - **Models** — Hugging Face search (`huggingface.co/api/models`), GGUF file listing with
   quantisation/param-count/size parsed from the API's own `gguf` metadata and filenames,
   resumable downloads (HTTP Range) with SHA-256 verification against HF's published LFS
@@ -44,6 +50,36 @@ not a hand-wave: `LlamaNative.supportsVulkan()` and the whole backend-selection 
 up and will report `true` the day a build defines `GGML_USE_VULKAN`; until then the app is
 explicit in the Performance tab that it's running CPU/NEON/KleidiAI only, rather than
 claiming GPU acceleration it doesn't have.
+
+## Image generation scope
+
+`imagegen/src/main/cpp/sd_bridge.cpp` bridges stable-diffusion.cpp as a **separate Gradle
+module with its own, fully static-linked native build** — not folded into the llama.cpp
+module's CMake tree. Two reasons:
+
+1. stable-diffusion.cpp vendors its own pinned fork of ggml (`leejet/ggml`, a different
+   commit from llama.cpp's own ggml copy). Building both inside one CMake configure would
+   define the target name `ggml` twice — a hard error.
+2. Even as two separate `add_subdirectory` calls, both forks default to building ggml as
+   *shared* libraries, which would each produce `libggml.so`/`libggml-base.so`/
+   `libggml-cpu.so` — identical filenames, silently colliding when AGP merges both
+   modules' native libs into one APK's `lib/arm64-v8a/`. `:imagegen`'s CMakeLists forces
+   `BUILD_SHARED_LIBS=OFF`, so stable-diffusion.cpp and its ggml statically link into one
+   shared object (`libsd_bridge.so`) with hidden symbol visibility — zero shared
+   intermediate libraries, zero collision surface. Verified: the shipped APK's
+   `lib/arm64-v8a/` carries both module's outputs side by side with no duplicate filenames.
+
+**Only CLIP-based diffusion models are supported** (SD1.x/2.x/SDXL/SDXL-Turbo, SDXS, and
+similar distilled/turbo checkpoints — the families that actually fit a phone). Upstream
+stable-diffusion.cpp also supports SD3/Flux/Qwen-Image-class models, whose text encoders
+(T5, UMT5, Gemma, Mistral, Qwen) embed ~137MB of vocab/merge tables as compiled-in C++
+headers (`src/tokenizers/vocab/*.hpp`) — removed entirely here (see the patch comment in
+`third_party/stable-diffusion.cpp/src/tokenizers/vocab/vocab.cpp`), both because those model
+families are multi-billion-parameter, multi-file giants no Android device can realistically
+load, and because keeping them compiled in regardless of which model you actually load would
+have bloated every build by that ~137MB for a capability this app's target hardware can't
+use. Loading a model that needs one of those encoders fails with a clear error rather than
+a crash.
 
 ## Dev Studio and ARM64
 

@@ -4,11 +4,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Notes
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.outlined.Chat
 import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.Download
+import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Notes
 import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material3.Icon
@@ -28,6 +30,7 @@ import com.llamaaistudio.app.LlamaAiStudioApp
 import com.llamaaistudio.app.ui.chat.ChatScreen
 import com.llamaaistudio.app.ui.devstudio.DevStudioScreen
 import com.llamaaistudio.app.ui.huggingface.ModelsScreen
+import com.llamaaistudio.app.ui.image.ImageGenScreen
 import com.llamaaistudio.app.ui.notes.NotesScreen
 import com.llamaaistudio.app.ui.perf.PerformanceScreen
 
@@ -39,6 +42,7 @@ enum class StudioDestination(
 ) {
     Chat("chat", "Chat", Icons.Filled.Chat, Icons.Outlined.Chat),
     Notes("notes", "Notes", Icons.Filled.Notes, Icons.Outlined.Notes),
+    Image("image", "Image", Icons.Filled.Image, Icons.Outlined.Image),
     Models("models", "Models", Icons.Filled.Download, Icons.Outlined.Download),
     Dev("dev", "Dev Studio", Icons.Filled.Code, Icons.Outlined.Code),
     Perf("perf", "Performance", Icons.Filled.Speed, Icons.Outlined.Speed),
@@ -83,6 +87,9 @@ fun StudioNavHost(navController: NavHostController, app: LlamaAiStudioApp) {
         }
         composable(StudioDestination.Notes.route) {
             NotesScreen(app = app)
+        }
+        composable(StudioDestination.Image.route) {
+            ImageGenScreen(app = app)
         }
         composable(StudioDestination.Models.route) {
             ModelsScreen(app = app)
