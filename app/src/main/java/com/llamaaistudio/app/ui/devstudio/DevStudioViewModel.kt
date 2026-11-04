@@ -24,7 +24,12 @@ data class DevStudioUiState(
     val dirty: Boolean = false,
     val status: String? = null,
     val isGeneratingCode: Boolean = false,
+    val codeGenTokens: Int = 0,
+    val codeGenTps: Double = 0.0,
+    val codeGenEtaSeconds: Double? = null,
 )
+
+private const val CODE_GEN_MAX_TOKENS = 1536
 
 class DevStudioViewModel(private val app: LlamaAiStudioApp) : ViewModel() {
     private val repo = app.devProjectRepository
@@ -126,6 +131,13 @@ class DevStudioViewModel(private val app: LlamaAiStudioApp) : ViewModel() {
      * over each time. The result lands in the editor for review before building — this never
      * builds or runs anything on its own.
      */
+    private var codeGenJob: kotlinx.coroutines.Job? = null
+
+    fun stopCodeGeneration() {
+        codeGenJob?.cancel()
+        _uiState.value = _uiState.value.copy(isGeneratingCode = false, status = "Cancelled")
+    }
+
     fun generateWithAi(idea: String) {
         val project = _uiState.value.selectedProject ?: return
         if (idea.isBlank() || _uiState.value.isGeneratingCode) return
@@ -133,13 +145,19 @@ class DevStudioViewModel(private val app: LlamaAiStudioApp) : ViewModel() {
             _uiState.value = _uiState.value.copy(status = "Load a model in the Chat or Models tab first")
             return
         }
-        viewModelScope.launch {
+        codeGenJob = viewModelScope.launch {
             val targetFile = _uiState.value.openFile ?: findMainSourceFile(project)
             if (targetFile == null) {
                 _uiState.value = _uiState.value.copy(status = "No source file found in this project to write into")
                 return@launch
             }
-            _uiState.value = _uiState.value.copy(isGeneratingCode = true, status = null)
+            _uiState.value = _uiState.value.copy(
+                isGeneratingCode = true,
+                status = null,
+                codeGenTokens = 0,
+                codeGenTps = 0.0,
+                codeGenEtaSeconds = null,
+            )
 
             val existingContent = runCatching { repo.readFile(targetFile) }.getOrDefault("")
             val turns = listOf(
@@ -159,10 +177,27 @@ class DevStudioViewModel(private val app: LlamaAiStudioApp) : ViewModel() {
 
             val sb = StringBuilder()
             var failure: String? = null
-            app.llamaEngine.generate(turns, GenerationParams(maxTokens = 1536, temperature = 0.2f))
+            var tokenCount = 0
+            val startTime = System.currentTimeMillis()
+            app.llamaEngine.generate(turns, GenerationParams(maxTokens = CODE_GEN_MAX_TOKENS, temperature = 0.2f))
                 .collect { event ->
                     when (event) {
-                        is GenerationEvent.Token -> sb.append(event.piece)
+                        is GenerationEvent.Token -> {
+                            sb.append(event.piece)
+                            tokenCount++
+                            val elapsedS = (System.currentTimeMillis() - startTime) / 1000.0
+                            val tps = if (elapsedS > 0) tokenCount / elapsedS else 0.0
+                            // Worst-case ETA assuming it runs to the token cap — the model will
+                            // very often stop earlier (it decides when the file is complete), so
+                            // this is a ceiling, not a prediction, and the UI labels it as such.
+                            val remaining = (CODE_GEN_MAX_TOKENS - tokenCount).coerceAtLeast(0)
+                            val eta = if (tps > 0) remaining / tps else null
+                            _uiState.value = _uiState.value.copy(
+                                codeGenTokens = tokenCount,
+                                codeGenTps = tps,
+                                codeGenEtaSeconds = eta,
+                            )
+                        }
                         is GenerationEvent.Failed -> failure = event.reason
                         is GenerationEvent.Done -> {}
                     }
@@ -180,7 +215,7 @@ class DevStudioViewModel(private val app: LlamaAiStudioApp) : ViewModel() {
                 openFile = targetFile,
                 openFileContent = cleaned,
                 dirty = false,
-                status = "AI updated ${targetFile.name} — review it, then build via Termux when ready",
+                status = "AI updated ${targetFile.name} ($tokenCount tokens) — review it, then build via Termux when ready",
             )
         }
     }

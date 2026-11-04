@@ -207,12 +207,9 @@ private fun AiBuilderCard(viewModel: DevStudioViewModel, uiState: DevStudioUiSta
                 enabled = !uiState.isGeneratingCode,
             )
             Spacer(Modifier.height(8.dp))
-            Button(
-                onClick = { viewModel.generateWithAi(idea) },
-                enabled = !uiState.isGeneratingCode && idea.isNotBlank(),
-            ) {
-                if (uiState.isGeneratingCode) {
-                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+            if (uiState.isGeneratingCode) {
+                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Button(onClick = {}, enabled = false) {
                         androidx.compose.material3.CircularProgressIndicator(
                             modifier = Modifier.size(16.dp),
                             strokeWidth = 2.dp,
@@ -221,7 +218,32 @@ private fun AiBuilderCard(viewModel: DevStudioViewModel, uiState: DevStudioUiSta
                         Spacer(Modifier.width(8.dp))
                         Text("Generating…")
                     }
-                } else {
+                    Spacer(Modifier.width(8.dp))
+                    TextButton(onClick = { viewModel.stopCodeGeneration() }) { Text("Stop") }
+                }
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    buildString {
+                        append("${uiState.codeGenTokens} tokens")
+                        if (uiState.codeGenTps > 0) append(" · %.1f tok/s".format(uiState.codeGenTps))
+                        uiState.codeGenEtaSeconds?.let { eta ->
+                            append(" · up to ~${formatEta(eta)} left")
+                        }
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = StudioTextMuted,
+                )
+                Text(
+                    "That's a ceiling, not a prediction — the model decides when the file is " +
+                        "done and usually stops well before the cap.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = StudioTextMuted,
+                )
+            } else {
+                Button(
+                    onClick = { viewModel.generateWithAi(idea) },
+                    enabled = idea.isNotBlank(),
+                ) {
                     Text("Generate")
                 }
             }
@@ -303,3 +325,6 @@ private fun FileEditorScreen(viewModel: DevStudioViewModel, uiState: DevStudioUi
         }
     }
 }
+
+private fun formatEta(seconds: Double): String =
+    if (seconds >= 60) "${(seconds / 60).toInt()}m ${(seconds % 60).toInt()}s" else "${seconds.toInt()}s"
