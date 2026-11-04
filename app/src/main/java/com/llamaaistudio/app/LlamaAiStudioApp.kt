@@ -12,11 +12,21 @@ import com.llamaaistudio.app.data.repo.ImageModelRepository
 import com.llamaaistudio.app.data.repo.ModelRepository
 import com.llamaaistudio.app.data.repo.NotesRepository
 import com.llamaaistudio.app.engine.LlamaEngine
+import com.llamaaistudio.app.engine.ModelLoadParams
 import com.llamaaistudio.imagegen.ImageGenEngine
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
+import java.io.File
 import java.util.concurrent.TimeUnit
 
 class LlamaAiStudioApp : Application() {
+
+    /** Outlives any single screen/ViewModel — used only to restore last-used state on launch. */
+    private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     lateinit var database: AppDatabase
         private set
@@ -101,5 +111,39 @@ class LlamaAiStudioApp : Application() {
             )
         }, httpClient)
         imageGalleryRepository = ImageGalleryRepository(database.generatedImageDao())
+
+        restoreLastUsedModels()
+    }
+
+    /**
+     * Closing and reopening the app otherwise means reselecting a model every time, since the
+     * loaded-model handle is purely in-memory and process death throws it away. Reload whatever
+     * was most recently used (if it's still on disk) so the app comes back ready instead of
+     * resetting to a blank slate.
+     */
+    private fun restoreLastUsedModels() {
+        applicationScope.launch {
+            val settings = settingsRepository.settings.first()
+            modelRepository.getMostRecentlyUsed()?.let { model ->
+                if (File(model.filePath).exists()) {
+                    llamaEngine.loadModel(
+                        model.filePath,
+                        ModelLoadParams(
+                            contextLength = settings.contextLength,
+                            threads = settings.threads,
+                            threadsBatch = settings.threads,
+                            useMlock = settings.useMlock,
+                        ),
+                    )
+                }
+            }
+        }
+        applicationScope.launch {
+            imageModelRepository.getMostRecentlyUsed()?.let { model ->
+                if (File(model.filePath).exists()) {
+                    imageGenEngine.loadModel(model.filePath)
+                }
+            }
+        }
     }
 }

@@ -128,6 +128,13 @@ jmethodID findOnTokenMethod(JNIEnv *env, jobject callback) {
     jclass cls = env->GetObjectClass(callback);
     jmethodID mid = env->GetMethodID(cls, "onToken", "(Ljava/lang/String;)Z");
     env->DeleteLocalRef(cls);
+    if (mid == nullptr) {
+        // GetMethodID leaves a pending NoSuchMethodError on failure; if we don't clear it,
+        // every later JNI call in this function silently fails too, which would look exactly
+        // like generation running (stats still come back) but streaming nothing to the UI.
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        llamaLogError("onToken method lookup failed; token callback disabled for this call");
+    }
     return mid;
 }
 

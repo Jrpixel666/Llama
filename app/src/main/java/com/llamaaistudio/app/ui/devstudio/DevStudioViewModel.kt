@@ -6,6 +6,9 @@ import androidx.lifecycle.viewModelScope
 import com.llamaaistudio.app.LlamaAiStudioApp
 import com.llamaaistudio.app.data.db.DevProjectEntity
 import com.llamaaistudio.app.devstudio.TermuxBridge
+import com.llamaaistudio.app.engine.ChatTurn
+import com.llamaaistudio.app.engine.GenerationEvent
+import com.llamaaistudio.app.engine.GenerationParams
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -20,6 +23,7 @@ data class DevStudioUiState(
     val openFileContent: String = "",
     val dirty: Boolean = false,
     val status: String? = null,
+    val isGeneratingCode: Boolean = false,
 )
 
 class DevStudioViewModel(private val app: LlamaAiStudioApp) : ViewModel() {
@@ -113,6 +117,81 @@ class DevStudioViewModel(private val app: LlamaAiStudioApp) : ViewModel() {
 
     fun clearStatus() {
         _uiState.value = _uiState.value.copy(status = null)
+    }
+
+    /**
+     * Rewrites the open file (or the project's main source file, if none is open) to implement
+     * [idea], using whatever model is currently loaded in the Chat/Models workspace. Feeds the
+     * file's current content back in so repeated ideas refine the same file instead of starting
+     * over each time. The result lands in the editor for review before building — this never
+     * builds or runs anything on its own.
+     */
+    fun generateWithAi(idea: String) {
+        val project = _uiState.value.selectedProject ?: return
+        if (idea.isBlank() || _uiState.value.isGeneratingCode) return
+        if (!app.llamaEngine.isLoaded) {
+            _uiState.value = _uiState.value.copy(status = "Load a model in the Chat or Models tab first")
+            return
+        }
+        viewModelScope.launch {
+            val targetFile = _uiState.value.openFile ?: findMainSourceFile(project)
+            if (targetFile == null) {
+                _uiState.value = _uiState.value.copy(status = "No source file found in this project to write into")
+                return@launch
+            }
+            _uiState.value = _uiState.value.copy(isGeneratingCode = true, status = null)
+
+            val existingContent = runCatching { repo.readFile(targetFile) }.getOrDefault("")
+            val turns = listOf(
+                ChatTurn(
+                    "system",
+                    "You are an expert Kotlin/Android developer. The user describes a feature or " +
+                        "change. Rewrite the ENTIRE file below to implement it, keeping it " +
+                        "compilable. Output ONLY the complete raw source code for the file — no " +
+                        "explanations, no markdown code fences, no commentary before or after.",
+                ),
+                ChatTurn(
+                    "user",
+                    "Current contents of ${targetFile.name}:\n\n$existingContent\n\n" +
+                        "Requested change:\n$idea",
+                ),
+            )
+
+            val sb = StringBuilder()
+            var failure: String? = null
+            app.llamaEngine.generate(turns, GenerationParams(maxTokens = 1536, temperature = 0.2f))
+                .collect { event ->
+                    when (event) {
+                        is GenerationEvent.Token -> sb.append(event.piece)
+                        is GenerationEvent.Failed -> failure = event.reason
+                        is GenerationEvent.Done -> {}
+                    }
+                }
+
+            if (failure != null) {
+                _uiState.value = _uiState.value.copy(isGeneratingCode = false, status = "AI generation failed: $failure")
+                return@launch
+            }
+
+            val cleaned = stripMarkdownFences(sb.toString())
+            repo.writeFile(targetFile, cleaned)
+            _uiState.value = _uiState.value.copy(
+                isGeneratingCode = false,
+                openFile = targetFile,
+                openFileContent = cleaned,
+                dirty = false,
+                status = "AI updated ${targetFile.name} — review it, then build via Termux when ready",
+            )
+        }
+    }
+
+    private fun findMainSourceFile(project: DevProjectEntity): File? =
+        repo.listFiles(File(project.rootPath)).firstOrNull { it.name == "MainActivity.kt" || it.name == "Main.kt" }
+
+    private fun stripMarkdownFences(text: String): String {
+        val trimmed = text.trim()
+        val fenced = Regex("^```[a-zA-Z0-9]*\\n([\\s\\S]*?)\\n?```$").find(trimmed)
+        return fenced?.groupValues?.get(1) ?: trimmed
     }
 
     class Factory(private val app: LlamaAiStudioApp) : ViewModelProvider.Factory {

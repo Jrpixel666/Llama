@@ -16,6 +16,8 @@ class ImageModelRepository(
 
     suspend fun markUsed(path: String) = dao.touchLastUsed(path, System.currentTimeMillis())
 
+    suspend fun getMostRecentlyUsed(): LocalImageModelEntity? = dao.getMostRecentlyUsed()
+
     suspend fun deleteModel(model: LocalImageModelEntity): Boolean {
         val file = File(model.filePath)
         val deleted = !file.exists() || file.delete()

@@ -21,6 +21,8 @@ class ModelRepository(
 
     suspend fun get(path: String): LocalModelEntity? = dao.get(path)
 
+    suspend fun getMostRecentlyUsed(): LocalModelEntity? = dao.getMostRecentlyUsed()
+
     suspend fun markUsed(path: String) = dao.touchLastUsed(path, System.currentTimeMillis())
 
     suspend fun deleteModel(model: LocalModelEntity): Boolean = withContext(Dispatchers.IO) {

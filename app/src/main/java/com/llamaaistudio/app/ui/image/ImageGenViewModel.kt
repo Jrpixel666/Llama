@@ -17,6 +17,7 @@ import com.llamaaistudio.imagegen.ImageGenParams
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.io.File
@@ -52,6 +53,18 @@ class ImageGenViewModel(private val app: LlamaAiStudioApp) : ViewModel() {
     val downloads = app.imageDownloadManager.downloads
 
     val genParams = MutableStateFlowHolder(ImageGenParams())
+
+    init {
+        viewModelScope.launch {
+            val restored = app.settingsRepository.settings.first().imageParams
+            genParams.update { restored }
+        }
+        viewModelScope.launch {
+            // Persists every change (including the restore above) so slider positions survive
+            // the app being closed and reopened instead of resetting to defaults each time.
+            genParams.flow.collect { params -> app.settingsRepository.setImageParams(params) }
+        }
+    }
 
     private val _uiState = MutableStateFlow(ImageGenUiState())
     val uiState: StateFlow<ImageGenUiState> = _uiState

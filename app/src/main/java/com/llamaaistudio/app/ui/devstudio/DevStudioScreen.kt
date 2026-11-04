@@ -8,6 +8,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -166,6 +168,9 @@ private fun ProjectDetailScreen(
             }
 
             Spacer(Modifier.height(16.dp))
+            AiBuilderCard(viewModel, uiState)
+
+            Spacer(Modifier.height(16.dp))
             ToolchainCard(app, viewModel)
 
             uiState.status?.let {
@@ -174,6 +179,59 @@ private fun ProjectDetailScreen(
                     Text(it, modifier = Modifier.padding(10.dp), style = MaterialTheme.typography.bodyMedium)
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun AiBuilderCard(viewModel: DevStudioViewModel, uiState: DevStudioUiState) {
+    var idea by remember { mutableStateOf("") }
+
+    Card(colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = StudioPanel)) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Text("Build with AI", style = MaterialTheme.typography.titleMedium, color = StudioOrange)
+            Spacer(Modifier.height(4.dp))
+            Text(
+                if (uiState.openFile != null) "Describe a change — the AI rewrites ${uiState.openFile!!.name} to match."
+                else "Describe what you want — the AI writes it into the project's main source file. Open a different file first to target that one instead.",
+                style = MaterialTheme.typography.labelSmall,
+                color = StudioTextMuted,
+            )
+            Spacer(Modifier.height(8.dp))
+            OutlinedTextField(
+                value = idea,
+                onValueChange = { idea = it },
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text("e.g. \"Add a button that shows the current time\"") },
+                minLines = 2,
+                enabled = !uiState.isGeneratingCode,
+            )
+            Spacer(Modifier.height(8.dp))
+            Button(
+                onClick = { viewModel.generateWithAi(idea) },
+                enabled = !uiState.isGeneratingCode && idea.isNotBlank(),
+            ) {
+                if (uiState.isGeneratingCode) {
+                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        androidx.compose.material3.CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.onPrimary,
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text("Generating…")
+                    }
+                } else {
+                    Text("Generate")
+                }
+            }
+            Text(
+                "Quality depends entirely on the model loaded in Chat/Models — a coding-focused " +
+                    "model (e.g. a Qwen2.5-Coder GGUF) will do much better than a general chat model.",
+                style = MaterialTheme.typography.labelSmall,
+                color = StudioTextMuted,
+                modifier = Modifier.padding(top = 8.dp),
+            )
         }
     }
 }

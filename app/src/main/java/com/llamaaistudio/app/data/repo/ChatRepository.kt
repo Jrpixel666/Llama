@@ -22,6 +22,8 @@ class ChatRepository(
     fun messages(sessionId: Long): Flow<List<ChatMessageEntity>> =
         chatDao.observeMessages(sessionId)
 
+    suspend fun getSession(sessionId: Long): ChatSessionEntity? = chatDao.getSession(sessionId)
+
     suspend fun createSession(
         title: String,
         systemPrompt: String = DEFAULT_SYSTEM_PROMPT,

@@ -97,6 +97,9 @@ interface LocalModelDao {
     @Query("SELECT * FROM local_models WHERE filePath = :path")
     suspend fun get(path: String): LocalModelEntity?
 
+    @Query("SELECT * FROM local_models WHERE lastUsedAt IS NOT NULL ORDER BY lastUsedAt DESC LIMIT 1")
+    suspend fun getMostRecentlyUsed(): LocalModelEntity?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(model: LocalModelEntity)
 
@@ -114,6 +117,9 @@ interface LocalImageModelDao {
 
     @Query("SELECT * FROM local_image_models WHERE filePath = :path")
     suspend fun get(path: String): LocalImageModelEntity?
+
+    @Query("SELECT * FROM local_image_models WHERE lastUsedAt IS NOT NULL ORDER BY lastUsedAt DESC LIMIT 1")
+    suspend fun getMostRecentlyUsed(): LocalImageModelEntity?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(model: LocalImageModelEntity)

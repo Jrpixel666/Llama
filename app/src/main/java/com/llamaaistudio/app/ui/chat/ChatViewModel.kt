@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.llamaaistudio.app.LlamaAiStudioApp
+import com.llamaaistudio.app.data.datastore.SettingsRepository
 import com.llamaaistudio.app.data.db.ChatMessageEntity
 import com.llamaaistudio.app.data.db.ChatSessionEntity
 import com.llamaaistudio.app.data.db.LocalModelEntity
@@ -17,6 +18,7 @@ import com.llamaaistudio.app.engine.LlamaEngine
 import com.llamaaistudio.app.engine.ModelLoadParams
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 data class ChatUiState(
@@ -33,6 +35,7 @@ class ChatViewModel(
     private val chatRepository: ChatRepository,
     private val modelRepository: ModelRepository,
     private val llamaEngine: LlamaEngine,
+    private val settingsRepository: SettingsRepository,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ChatUiState())
@@ -42,12 +45,34 @@ class ChatViewModel(
 
     val genParams = MutableStateFlowHolder(GenerationParams())
 
+    private var createdDefaultSession = false
+
     init {
         viewModelScope.launch {
+            // Settings load first so the preferred session id and remembered generation
+            // params are in hand before we start reacting to the sessions list — otherwise
+            // reopening the app would race and fall back to "just pick the first session"
+            // more often than not.
+            val settings = settingsRepository.settings.first()
+            genParams.update { settings.chatParams }
+            val preferredSessionId = settings.lastChatSessionId
+
             chatRepository.sessions.collect { sessions ->
                 _uiState.value = _uiState.value.copy(sessions = sessions)
-                if (_uiState.value.currentSessionId == null && sessions.isNotEmpty()) {
-                    selectSession(sessions.first().id)
+                if (_uiState.value.currentSessionId == null) {
+                    when {
+                        sessions.isNotEmpty() -> {
+                            val preferred = preferredSessionId?.let { id -> sessions.find { it.id == id } }
+                            selectSession((preferred ?: sessions.first()).id)
+                        }
+                        // Fresh install / all sessions deleted: without this, sendMessage()
+                        // has nothing to attach to and silently no-ops — the chat screen
+                        // just looks permanently blank with no error shown.
+                        !createdDefaultSession -> {
+                            createdDefaultSession = true
+                            newSession()
+                        }
+                    }
                 }
             }
         }
@@ -55,6 +80,7 @@ class ChatViewModel(
 
     fun selectSession(sessionId: Long) {
         _uiState.value = _uiState.value.copy(currentSessionId = sessionId, messages = emptyList())
+        viewModelScope.launch { settingsRepository.setLastChatSessionId(sessionId) }
         viewModelScope.launch {
             chatRepository.messages(sessionId).collect { msgs ->
                 if (_uiState.value.currentSessionId == sessionId) {
@@ -86,6 +112,7 @@ class ChatViewModel(
 
     fun updateGenerationParams(update: (GenerationParams) -> GenerationParams) {
         genParams.update(update)
+        viewModelScope.launch { settingsRepository.setChatParams(genParams.value) }
     }
 
     fun loadModel(model: LocalModelEntity, loadParams: ModelLoadParams) {
@@ -110,7 +137,9 @@ class ChatViewModel(
         val sessionId = _uiState.value.currentSessionId ?: return
         if (text.isBlank() || _uiState.value.isGenerating) return
         generationJob = viewModelScope.launch {
-            val session = _uiState.value.sessions.find { it.id == sessionId } ?: return@launch
+            // Fetched directly rather than from the in-memory sessions list: right after
+            // newSession() the list may not have caught up with the just-inserted row yet.
+            val session = chatRepository.getSession(sessionId) ?: return@launch
             _uiState.value = _uiState.value.copy(isGenerating = true, streamingText = "", error = null)
             val startTime = System.currentTimeMillis()
             var tokenCount = 0
@@ -150,7 +179,7 @@ class ChatViewModel(
     class Factory(private val app: LlamaAiStudioApp) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T =
-            ChatViewModel(app.chatRepository, app.modelRepository, app.llamaEngine) as T
+            ChatViewModel(app.chatRepository, app.modelRepository, app.llamaEngine, app.settingsRepository) as T
     }
 }
 
