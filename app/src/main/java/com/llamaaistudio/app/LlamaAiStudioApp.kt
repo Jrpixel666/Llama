@@ -14,6 +14,8 @@ import com.llamaaistudio.app.data.repo.NotesRepository
 import com.llamaaistudio.app.engine.LlamaEngine
 import com.llamaaistudio.app.engine.ModelLoadParams
 import com.llamaaistudio.imagegen.ImageGenEngine
+import android.util.Log
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -25,8 +27,17 @@ import java.util.concurrent.TimeUnit
 
 class LlamaAiStudioApp : Application() {
 
-    /** Outlives any single screen/ViewModel — used only to restore last-used state on launch. */
-    private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    /**
+     * Outlives any single screen/ViewModel — used only to restore last-used state on launch.
+     * This is best-effort background work; a failure in it (e.g. a model load erroring out)
+     * must never take the whole app down, hence the exception handler instead of letting it
+     * propagate to the default (crashing) handler.
+     */
+    private val applicationScope = CoroutineScope(
+        SupervisorJob() + Dispatchers.Default + CoroutineExceptionHandler { _, e ->
+            Log.e("LlamaAiStudioApp", "Background restore failed (non-fatal)", e)
+        },
+    )
 
     lateinit var database: AppDatabase
         private set
@@ -120,12 +131,21 @@ class LlamaAiStudioApp : Application() {
      * loaded-model handle is purely in-memory and process death throws it away. Reload whatever
      * was most recently used (if it's still on disk) so the app comes back ready instead of
      * resetting to a blank slate.
+     *
+     * This runs sequentially and checks available memory before each load — a phone's RAM
+     * budget can't necessarily hold a multi-GB chat model AND a multi-GB diffusion model at
+     * once, and loading both unconditionally in parallel (as an earlier version of this did)
+     * left the process memory-starved, with no obvious cause: the crash this was producing
+     * showed up as soon as almost anything else tried to allocate — a settings change, a
+     * Compose recomposition from dragging a slider — not at the load itself.
      */
     private fun restoreLastUsedModels() {
         applicationScope.launch {
             val settings = settingsRepository.settings.first()
             modelRepository.getMostRecentlyUsed()?.let { model ->
-                if (File(model.filePath).exists()) {
+                val fits = modelRepository.estimateRamRequirementBytes(model.sizeBytes, settings.contextLength) <
+                    modelRepository.availableMemoryBytes() * 0.7
+                if (fits && File(model.filePath).exists()) {
                     llamaEngine.loadModel(
                         model.filePath,
                         ModelLoadParams(
@@ -137,10 +157,13 @@ class LlamaAiStudioApp : Application() {
                     )
                 }
             }
-        }
-        applicationScope.launch {
+
+            // Checked again (not just once up front): loading the chat model above, if it
+            // happened, already spent part of the available budget.
             imageModelRepository.getMostRecentlyUsed()?.let { model ->
-                if (File(model.filePath).exists()) {
+                val fits = imageModelRepository.estimateRamRequirementBytes(model.sizeBytes) <
+                    modelRepository.availableMemoryBytes() * 0.7
+                if (fits && File(model.filePath).exists()) {
                     imageGenEngine.loadModel(model.filePath)
                 }
             }

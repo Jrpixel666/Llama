@@ -138,6 +138,15 @@ private fun ProfileCard(current: PerformanceProfile, onSelect: (PerformanceProfi
     }
 }
 
+// "Max performance" sets threads = recommendedThreads + 1, which on an 8-recommended-thread
+// device (plausible on the Pixel 9's 8/9-core Tensor G4) is 9 — a value a 1f..8f slider range
+// can't represent. Material3's Slider is not guaranteed to just clamp a value outside its
+// declared valueRange, so this range must always be wide enough to hold whatever the profiles
+// can actually produce, and the seed value is coerced into it defensively regardless.
+private const val MAX_THREADS_SLIDER = 16f
+private const val MIN_CONTEXT_SLIDER = 1024f
+private const val MAX_CONTEXT_SLIDER = 16384f
+
 @Composable
 private fun TuningCard(
     threads: Int,
@@ -145,25 +154,29 @@ private fun TuningCard(
     onThreadsChange: (Int) -> Unit,
     onContextChange: (Int) -> Unit,
 ) {
-    var threadsSlider by remember(threads) { mutableFloatStateOf(threads.toFloat()) }
-    var contextSlider by remember(contextLength) { mutableFloatStateOf(contextLength.toFloat()) }
+    var threadsSlider by remember(threads) {
+        mutableFloatStateOf(threads.toFloat().coerceIn(1f, MAX_THREADS_SLIDER))
+    }
+    var contextSlider by remember(contextLength) {
+        mutableFloatStateOf(contextLength.toFloat().coerceIn(MIN_CONTEXT_SLIDER, MAX_CONTEXT_SLIDER))
+    }
 
     SectionCard("Manual tuning") {
         Text("Threads: ${threadsSlider.toInt()}")
         Slider(
-            value = threadsSlider,
+            value = threadsSlider.coerceIn(1f, MAX_THREADS_SLIDER),
             onValueChange = { threadsSlider = it },
             onValueChangeFinished = { onThreadsChange(threadsSlider.toInt()) },
-            valueRange = 1f..8f,
-            steps = 6,
+            valueRange = 1f..MAX_THREADS_SLIDER,
+            steps = 14,
         )
         Spacer(Modifier.height(8.dp))
         Text("Context length: ${contextSlider.toInt()}")
         Slider(
-            value = contextSlider,
+            value = contextSlider.coerceIn(MIN_CONTEXT_SLIDER, MAX_CONTEXT_SLIDER),
             onValueChange = { contextSlider = it },
             onValueChangeFinished = { onContextChange(contextSlider.toInt()) },
-            valueRange = 1024f..16384f,
+            valueRange = MIN_CONTEXT_SLIDER..MAX_CONTEXT_SLIDER,
             steps = 14,
         )
     }
